@@ -23,8 +23,11 @@ def callback_width(self, context):
     self.update_width(context)
 def callback_strips(self, context):
     self.update_strips()
+def callback_lane_split(self, context):
+    self.update_lane_split(context)
 
 class DSC_enum_strip(bpy.types.PropertyGroup):
+    idx: bpy.props.IntProperty(min=0)
     direction: bpy.props.EnumProperty(
         items=(('left', 'left', '', 0),
                ('right', 'right', '', 1),
@@ -69,6 +72,7 @@ class DSC_enum_strip(bpy.types.PropertyGroup):
               ),
         default='none',
     )
+    lane_split: bpy.props.BoolProperty(description='Split above here', update=callback_lane_split)
 
     def update_width(self, context):
         if self.type == 'line':
@@ -84,6 +88,26 @@ class DSC_enum_strip(bpy.types.PropertyGroup):
                 'none' : context.scene.road_properties.width_none,
             }
             self.width = mapping_type_width[self.type]
+
+    def update_lane_split(self, context):
+        # Avoid updating recursively
+        if context.scene.road_properties.lock_strips:
+            return
+        context.scene.road_properties.lock_strips = True
+        split_idx = self.idx
+        if split_idx <= 1:
+            # Reset splitting
+            for strip in context.scene.road_properties.strips:
+                strip.lane_split = False
+        else:
+            # Split at the desired lane
+            for idx, strip in enumerate(context.scene.road_properties.strips):
+                if idx < split_idx:
+                    strip.lane_split = False
+                else:
+                    strip.lane_split = True
+        # Unlock updating
+        context.scene.road_properties.lock_strips = False
 
 
 class DSC_road_properties(bpy.types.PropertyGroup):
@@ -104,6 +128,7 @@ class DSC_road_properties(bpy.types.PropertyGroup):
     num_lanes_left: bpy.props.IntProperty(default=2, min=0, max=20, update=callback_strips)
     num_lanes_right: bpy.props.IntProperty(default=2, min=1, max=20, update=callback_strips)
 
+    strip_idx_current: bpy.props.IntProperty(default=0, min=0)
     strips: bpy.props.CollectionProperty(type=DSC_enum_strip)
 
     cross_section_preset: bpy.props.EnumProperty(
@@ -176,16 +201,20 @@ class DSC_road_properties(bpy.types.PropertyGroup):
                     self.add_strip('right', 'driving', self.width_driving, 'none')
                     self.add_strip('right', 'line', self.width_line_standard, 'broken')
 
-    def add_strip(self, direction, type, width, type_road_mark='none'):
+    def add_strip(self, direction, type, width, type_road_mark='none', lane_split=False):
         strip = self.strips.add()
+        strip.idx = self.strip_idx_current
+        self.strip_idx_current += 1
         strip.direction = direction
         strip.type = type
         strip.width = width
         strip.type_road_mark = type_road_mark
+        strip.lane_split = False
 
     def update_cross_section(self):
         # Reset
         self.strips.clear()
+        self.strip_idx_current = 0
         num_lanes_left = 0
         num_lanes_right = 0
         # Build up cross section
@@ -217,3 +246,6 @@ class DSC_road_properties(bpy.types.PropertyGroup):
             widths.append(strip.width)
             types.append(strip.type)
             types_road_marks.append(strip.type_road_mark)
+
+    def update_lane_split(self):
+        self.strips
